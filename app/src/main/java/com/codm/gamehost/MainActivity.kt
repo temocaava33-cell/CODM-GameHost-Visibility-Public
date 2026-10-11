@@ -48,7 +48,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "CODM GAME HOST v0.5"
+            text = "CODM GAME HOST v0.6"
             setTextColor(cyan)
             textSize = 23f
             setTypeface(typeface, 1)
@@ -63,23 +63,29 @@ class MainActivity : Activity() {
         }
         root.addView(status)
 
-        root.addView(button("GRANT / RECONNECT SHIZUKU", cyan) {
+        root.addView(button("GRANT / CHECK SHIZUKU", cyan) {
             if (!ShizukuBridge.permissionGranted) {
                 ShizukuBridge.requestPermission()
             } else {
                 ShizukuBridge.forceReconnect()
             }
+            refreshStatus()
             output.text = ShizukuBridge.diagnostics()
-            handler.postDelayed({
-                refreshStatus()
-                output.text = ShizukuBridge.diagnostics()
-            }, 1200)
         })
 
-        root.addView(button("▶ PLAY CODM • MASTER90", Color.rgb(0, 230, 118)) {
+        val probeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        probeRow.addView(button("TEST SHELL UID", panel) {
+            editor.setText("id\necho USER=$(am get-current-user)\nsettings get system peak_refresh_rate")
+            runEditor()
+        }, weight())
+        probeRow.addView(button("▶ PLAY CODM • MASTER90", Color.rgb(0, 230, 118)) {
             loadAsset("MASTER90.sh")
             runEditor()
-        })
+        }, weight())
+        root.addView(probeRow)
 
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -165,12 +171,11 @@ class MainActivity : Activity() {
         }
 
     private fun refreshStatus() {
-        val binder = ShizukuBridge.binderAvailable
-        val ready = ShizukuBridge.isReady()
+        val ready = ShizukuBridge.canExecute()
         status.text = ShizukuBridge.diagnostics()
         status.setTextColor(
             if (ready) Color.rgb(0, 230, 118)
-            else if (binder) Color.rgb(255, 193, 7)
+            else if (ShizukuBridge.binderAvailable) Color.rgb(255, 193, 7)
             else Color.rgb(255, 61, 113)
         )
     }
@@ -232,14 +237,16 @@ class MainActivity : Activity() {
             output.text = "Script is empty."
             return
         }
-        if (!ShizukuBridge.isReady()) {
-            ShizukuBridge.forceReconnect()
-            output.text = "Shizuku service is not ready. Reconnect started.\n\n" + ShizukuBridge.diagnostics()
+        if (!ShizukuBridge.canExecute()) {
+            ShizukuBridge.requestPermission()
+            output.text = "NO EXECUTABLE SHIZUKU TRANSPORT\n\n" + ShizukuBridge.diagnostics()
+            refreshStatus()
             return
         }
-        output.text = "RUNNING..."
+
+        output.text = "RUNNING via " + ShizukuBridge.transportName() + "..."
         Thread {
-            val result = ShizukuBridge.exec(script) ?: "NO RESULT / SERVICE DISCONNECTED"
+            val result = ShizukuBridge.exec(script) ?: "NO RESULT\n" + ShizukuBridge.diagnostics()
             runOnUiThread {
                 output.text = result
                 refreshStatus()
