@@ -48,7 +48,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "CODM GAME HOST v0.4"
+            text = "CODM GAME HOST v0.5"
             setTextColor(cyan)
             textSize = 23f
             setTypeface(typeface, 1)
