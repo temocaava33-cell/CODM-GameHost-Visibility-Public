@@ -26,6 +26,7 @@ class MainActivity : Activity() {
         ShizukuBridge.init()
         setContentView(buildUi())
         refreshStatus()
+
         handler.postDelayed(object : Runnable {
             override fun run() {
                 refreshStatus()
@@ -47,13 +48,12 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(18), dp(14), dp(18))
         }
 
-        val title = TextView(this).apply {
-            text = "CODM GAME HOST v0.6"
+        root.addView(TextView(this).apply {
+            text = "CODM GAME HOST v0.7"
             setTextColor(cyan)
             textSize = 23f
             setTypeface(typeface, 1)
-        }
-        root.addView(title)
+        })
 
         status = TextView(this).apply {
             text = "SHIZUKU: checking..."
@@ -78,7 +78,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         probeRow.addView(button("TEST SHELL UID", panel) {
-            editor.setText("id\necho USER=$(am get-current-user)\nsettings get system peak_refresh_rate")
+            editor.setText(
+                "id\n" +
+                "echo USER=$(am get-current-user)\n" +
+                "echo PEAK=$(settings get system peak_refresh_rate)\n" +
+                "cmd game list-modes com.activision.callofduty.shooter 2>&1"
+            )
             runEditor()
         }, weight())
         probeRow.addView(button("▶ PLAY CODM • MASTER90", Color.rgb(0, 230, 118)) {
@@ -104,13 +109,12 @@ class MainActivity : Activity() {
         row2.addView(button("RUN", cyan) { runEditor() }, weight())
         root.addView(row2)
 
-        val label = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "SCRIPT LAB"
             setTextColor(muted)
             textSize = 12f
             setPadding(0, dp(10), 0, dp(5))
-        }
-        root.addView(label)
+        })
 
         editor = EditText(this).apply {
             setTextColor(white)
@@ -124,18 +128,20 @@ class MainActivity : Activity() {
             hint = "#!/system/bin/sh"
             setHorizontallyScrolling(true)
         }
-        root.addView(editor, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(330)
-        ))
+        root.addView(
+            editor,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(330)
+            )
+        )
 
-        val outLabel = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "OUTPUT"
             setTextColor(muted)
             textSize = 12f
             setPadding(0, dp(10), 0, dp(5))
-        }
-        root.addView(outLabel)
+        })
 
         val scroll = ScrollView(this)
         output = TextView(this).apply {
@@ -146,11 +152,14 @@ class MainActivity : Activity() {
             text = "Ready."
         }
         scroll.addView(output)
-        root.addView(scroll, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            0,
-            1f
-        ))
+        root.addView(
+            scroll,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
 
         return root
     }
@@ -171,10 +180,9 @@ class MainActivity : Activity() {
         }
 
     private fun refreshStatus() {
-        val ready = ShizukuBridge.canExecute()
         status.text = ShizukuBridge.diagnostics()
         status.setTextColor(
-            if (ready) Color.rgb(0, 230, 118)
+            if (ShizukuBridge.canExecute()) Color.rgb(0, 230, 118)
             else if (ShizukuBridge.binderAvailable) Color.rgb(255, 193, 7)
             else Color.rgb(255, 61, 113)
         )
@@ -201,7 +209,9 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != requestOpen || resultCode != RESULT_OK) return
+
         val uri = data?.data ?: return
+
         try {
             contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input)
@@ -215,7 +225,13 @@ class MainActivity : Activity() {
 
     private fun displayName(uri: Uri): String {
         var name = "script.sh"
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+        contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null
+        )?.use { c ->
             if (c.moveToFirst()) name = c.getString(0) ?: name
         }
         return name
@@ -233,10 +249,12 @@ class MainActivity : Activity() {
 
     private fun runEditor() {
         val script = editor.text.toString()
+
         if (script.isBlank()) {
             output.text = "Script is empty."
             return
         }
+
         if (!ShizukuBridge.canExecute()) {
             ShizukuBridge.requestPermission()
             output.text = "NO EXECUTABLE SHIZUKU TRANSPORT\n\n" + ShizukuBridge.diagnostics()
@@ -245,8 +263,11 @@ class MainActivity : Activity() {
         }
 
         output.text = "RUNNING via " + ShizukuBridge.transportName() + "..."
+
         Thread {
-            val result = ShizukuBridge.exec(script) ?: "NO RESULT\n" + ShizukuBridge.diagnostics()
+            val result = ShizukuBridge.exec(script)
+                ?: ("NO RESULT\n" + ShizukuBridge.diagnostics())
+
             runOnUiThread {
                 output.text = result
                 refreshStatus()
@@ -254,5 +275,6 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun dp(v: Int): Int =
+        (v * resources.displayMetrics.density).toInt()
 }

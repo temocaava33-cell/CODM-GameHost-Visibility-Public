@@ -4,9 +4,9 @@ import android.content.ComponentName
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
+import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
-import java.lang.reflect.InvocationTargetException
-import java.lang.reflect.Method
 
 object ShizukuBridge {
     private const val REQUEST_CODE = 9101
@@ -15,22 +15,20 @@ object ShizukuBridge {
     @Volatile private var binding = false
     @Volatile private var initialized = false
     @Volatile private var attempts = 0
+
     @Volatile var lastEvent: String = "INIT"
         private set
     @Volatile var lastError: String = ""
         private set
 
-    private var cachedNewProcess: Method? = null
-    private var newProcessResolved = false
-
-    private val args by lazy {
+    private val userServiceArgs by lazy {
         Shizuku.UserServiceArgs(
             ComponentName("com.codm.gamehost", JavaShellService::class.java.name)
         )
             .daemon(false)
             .processNameSuffix("service")
             .debuggable(true)
-            .version(6)
+            .version(7)
     }
 
     private val connection = object : ServiceConnection {
@@ -61,34 +59,19 @@ object ShizukuBridge {
     val serverApi: Int
         get() = try { Shizuku.getVersion() } catch (_: Throwable) { -1 }
 
-    private fun resolveNewProcess(): Method? {
-        if (newProcessResolved) return cachedNewProcess
-        synchronized(this) {
-            if (newProcessResolved) return cachedNewProcess
-            newProcessResolved = true
-            cachedNewProcess = try {
-                val arrayClass = arrayOf<String>().javaClass
-                Shizuku::class.java.getDeclaredMethod(
-                    "newProcess",
-                    arrayClass,
-                    arrayClass,
-                    String::class.java
-                ).apply { isAccessible = true }
-            } catch (t: Throwable) {
-                lastError = "newProcess reflection: " + t.javaClass.simpleName + ": " + (t.message ?: "missing")
-                null
-            }
-            return cachedNewProcess
-        }
+    private fun server(): IShizukuService? {
+        val binder = try { Shizuku.getBinder() } catch (_: Throwable) { null } ?: return null
+        return try { IShizukuService.Stub.asInterface(binder) } catch (_: Throwable) { null }
     }
 
     val remoteProcessAvailable: Boolean
-        get() = binderAvailable && permissionGranted && serverApi in 11..13 && resolveNewProcess() != null
+        get() = binderAvailable && permissionGranted && serverApi in 11..13 && server() != null
 
-    fun canExecute(): Boolean = binderAvailable && permissionGranted && (remoteProcessAvailable || service != null)
+    fun canExecute(): Boolean =
+        binderAvailable && permissionGranted && (remoteProcessAvailable || service != null)
 
     fun transportName(): String = when {
-        remoteProcessAvailable -> "REMOTE_PROCESS"
+        remoteProcessAvailable -> "REMOTE_PROCESS_AIDL"
         service != null -> "USER_SERVICE"
         else -> "NONE"
     }
@@ -98,49 +81,63 @@ object ShizukuBridge {
         initialized = true
 
         Shizuku.addBinderReceivedListenerSticky {
-            lastEvent = if (remoteProcessAvailable) "REMOTE_PROCESS_READY" else "BINDER_RECEIVED"
             lastError = ""
-            if (!remoteProcessAvailable && permissionGranted) connectUserService()
+            if (remoteProcessAvailable) {
+                lastEvent = "REMOTE_PROCESS_READY"
+            } else if (permissionGranted) {
+                lastEvent = "BINDER_RECEIVED"
+                connectUserService()
+            }
         }
 
         Shizuku.addBinderDeadListener {
             service = null
             binding = false
-            cachedNewProcess = null
-            newProcessResolved = false
             lastEvent = "BINDER_DEAD"
             lastError = "Shizuku binder died"
         }
 
         Shizuku.addRequestPermissionResultListener { code, grant ->
-            if (code == REQUEST_CODE) {
-                if (grant == PackageManager.PERMISSION_GRANTED) {
-                    lastEvent = if (remoteProcessAvailable) "REMOTE_PROCESS_READY" else "PERMISSION_GRANTED"
-                    lastError = ""
-                    if (!remoteProcessAvailable) connectUserService()
+            if (code != REQUEST_CODE) return@addRequestPermissionResultListener
+
+            if (grant == PackageManager.PERMISSION_GRANTED) {
+                lastError = ""
+                if (remoteProcessAvailable) {
+                    lastEvent = "REMOTE_PROCESS_READY"
                 } else {
-                    lastEvent = "PERMISSION_DENIED"
-                    lastError = "Shizuku permission denied: " + grant
+                    lastEvent = "PERMISSION_GRANTED"
+                    connectUserService()
                 }
+            } else {
+                lastEvent = "PERMISSION_DENIED"
+                lastError = "Shizuku permission denied: " + grant
             }
         }
 
         if (binderAvailable && permissionGranted) {
-            lastEvent = if (remoteProcessAvailable) "REMOTE_PROCESS_READY" else "BINDER_READY"
-            if (!remoteProcessAvailable) connectUserService()
+            if (remoteProcessAvailable) {
+                lastEvent = "REMOTE_PROCESS_READY"
+            } else {
+                lastEvent = "BINDER_READY"
+                connectUserService()
+            }
         }
     }
 
     fun requestPermission() {
         if (!binderAvailable) {
-            lastError = "Shizuku binder unavailable"
             lastEvent = "NO_BINDER"
+            lastError = "Shizuku binder unavailable"
             return
         }
+
         if (!permissionGranted) {
             lastEvent = "REQUEST_PERMISSION"
             Shizuku.requestPermission(REQUEST_CODE)
-        } else if (remoteProcessAvailable) {
+            return
+        }
+
+        if (remoteProcessAvailable) {
             lastEvent = "REMOTE_PROCESS_READY"
             lastError = ""
         } else {
@@ -152,13 +149,13 @@ object ShizukuBridge {
         if (!binderAvailable || !permissionGranted || remoteProcessAvailable) return
         if (service != null || binding) return
 
-        binding = true
         attempts += 1
+        binding = true
         lastEvent = "USER_SERVICE_BIND_ATTEMPT:" + attempts
         lastError = ""
 
         try {
-            Shizuku.bindUserService(args, connection)
+            Shizuku.bindUserService(userServiceArgs, connection)
         } catch (t: Throwable) {
             binding = false
             lastEvent = "USER_SERVICE_BIND_EXCEPTION"
@@ -169,8 +166,6 @@ object ShizukuBridge {
     fun forceReconnect() {
         service = null
         binding = false
-        cachedNewProcess = null
-        newProcessResolved = false
         lastError = ""
         lastEvent = "RECHECK_TRANSPORT"
 
@@ -180,7 +175,7 @@ object ShizukuBridge {
         }
 
         try {
-            Shizuku.unbindUserService(args, connection, true)
+            Shizuku.unbindUserService(userServiceArgs, connection, true)
         } catch (_: Throwable) {
         }
         connectUserService()
@@ -204,8 +199,8 @@ object ShizukuBridge {
 
     fun exec(command: String): String? {
         if (!binderAvailable || !permissionGranted) {
-            lastError = "Shizuku binder/permission unavailable"
             lastEvent = "EXEC_BLOCKED"
+            lastError = "Shizuku binder/permission unavailable"
             return null
         }
 
@@ -230,53 +225,70 @@ object ShizukuBridge {
         }
 
         connectUserService()
-        lastError = "No executable Shizuku transport"
         lastEvent = "EXEC_NO_TRANSPORT"
+        lastError = "No executable Shizuku transport"
         return null
     }
 
     private fun execRemoteProcess(command: String): String {
-        val method = resolveNewProcess()
-            ?: return "TRANSPORT=REMOTE_PROCESS\nRC=255\nnewProcess method unavailable"
+        val shizukuService = server()
+            ?: return failRemote("Shizuku service binder unavailable")
 
         return try {
-            val cmd = arrayOf("/system/bin/sh", "-c", command)
-            val process = method.invoke(null, cmd, null, null) as Process
+            val remote = shizukuService.newProcess(
+                arrayOf("/system/bin/sh", "-c", command),
+                null,
+                null
+            )
 
             val stdout = StringBuilder()
             val stderr = StringBuilder()
 
-            val outThread = Thread {
+            val stdoutThread = Thread {
                 try {
-                    process.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { stdout.append(it).append('\n') }
-                    }
+                    ParcelFileDescriptor.AutoCloseInputStream(remote.inputStream)
+                        .bufferedReader()
+                        .useLines { lines ->
+                            lines.forEach { stdout.append(it).append('\n') }
+                        }
                 } catch (t: Throwable) {
-                    stderr.append("[stdout-reader] ").append(t.message ?: t.javaClass.simpleName).append('\n')
+                    stderr.append("[stdout-reader] ")
+                        .append(t.javaClass.simpleName)
+                        .append(": ")
+                        .append(t.message ?: "failed")
+                        .append('\n')
                 }
             }
 
-            val errThread = Thread {
+            val stderrThread = Thread {
                 try {
-                    process.errorStream.bufferedReader().useLines { lines ->
-                        lines.forEach { stderr.append(it).append('\n') }
-                    }
+                    ParcelFileDescriptor.AutoCloseInputStream(remote.errorStream)
+                        .bufferedReader()
+                        .useLines { lines ->
+                            lines.forEach { stderr.append(it).append('\n') }
+                        }
                 } catch (t: Throwable) {
-                    stderr.append("[stderr-reader] ").append(t.message ?: t.javaClass.simpleName).append('\n')
+                    stderr.append("[stderr-reader] ")
+                        .append(t.javaClass.simpleName)
+                        .append(": ")
+                        .append(t.message ?: "failed")
+                        .append('\n')
                 }
             }
 
-            outThread.start()
-            errThread.start()
-            val rc = process.waitFor()
-            outThread.join()
-            errThread.join()
+            stdoutThread.start()
+            stderrThread.start()
+
+            val rc = remote.waitFor()
+
+            stdoutThread.join()
+            stderrThread.join()
 
             lastEvent = "EXEC_REMOTE_PROCESS_OK"
             lastError = ""
 
             buildString {
-                append("TRANSPORT=REMOTE_PROCESS\n")
+                append("TRANSPORT=REMOTE_PROCESS_AIDL\n")
                 append("RC=").append(rc).append('\n')
                 if (stdout.isNotEmpty()) append(stdout)
                 if (stderr.isNotEmpty()) {
@@ -285,14 +297,13 @@ object ShizukuBridge {
                 }
             }
         } catch (t: Throwable) {
-            val root = if (t is InvocationTargetException && t.targetException != null) {
-                t.targetException
-            } else {
-                t
-            }
-            lastEvent = "EXEC_REMOTE_PROCESS_FAILED"
-            lastError = root.javaClass.simpleName + ": " + (root.message ?: "failed")
-            "TRANSPORT=REMOTE_PROCESS\nRC=255\n" + lastError
+            failRemote(t.javaClass.simpleName + ": " + (t.message ?: "remote process failed"))
         }
+    }
+
+    private fun failRemote(message: String): String {
+        lastEvent = "EXEC_REMOTE_PROCESS_FAILED"
+        lastError = message
+        return "TRANSPORT=REMOTE_PROCESS_AIDL\nRC=255\n" + message
     }
 }
