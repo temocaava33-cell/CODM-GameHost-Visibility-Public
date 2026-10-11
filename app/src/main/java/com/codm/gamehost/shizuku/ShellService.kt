@@ -5,6 +5,11 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 
 class ShellService : IShellService.Stub() {
+
+    override fun destroy() {
+        System.exit(0)
+    }
+
     @Throws(RemoteException::class)
     override fun exec(command: String): String {
         return try {
