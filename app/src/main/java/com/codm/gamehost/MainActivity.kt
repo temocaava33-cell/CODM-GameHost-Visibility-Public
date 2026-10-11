@@ -48,7 +48,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "CODM GAME HOST v0.3"
+            text = "CODM GAME HOST v0.4"
             setTextColor(cyan)
             textSize = 23f
             setTypeface(typeface, 1)
@@ -63,10 +63,17 @@ class MainActivity : Activity() {
         }
         root.addView(status)
 
-        root.addView(button("GRANT / CONNECT SHIZUKU", cyan) {
-            ShizukuBridge.requestPermission()
-            ShizukuBridge.connect()
-            refreshStatus()
+        root.addView(button("GRANT / RECONNECT SHIZUKU", cyan) {
+            if (!ShizukuBridge.permissionGranted) {
+                ShizukuBridge.requestPermission()
+            } else {
+                ShizukuBridge.forceReconnect()
+            }
+            output.text = ShizukuBridge.diagnostics()
+            handler.postDelayed({
+                refreshStatus()
+                output.text = ShizukuBridge.diagnostics()
+            }, 1200)
         })
 
         root.addView(button("▶ PLAY CODM • MASTER90", Color.rgb(0, 230, 118)) {
@@ -159,9 +166,8 @@ class MainActivity : Activity() {
 
     private fun refreshStatus() {
         val binder = ShizukuBridge.binderAvailable
-        val perm = ShizukuBridge.permissionGranted
         val ready = ShizukuBridge.isReady()
-        status.text = "SHIZUKU binder=" + binder + " permission=" + perm + " service=" + ready
+        status.text = ShizukuBridge.diagnostics()
         status.setTextColor(
             if (ready) Color.rgb(0, 230, 118)
             else if (binder) Color.rgb(255, 193, 7)
@@ -227,8 +233,8 @@ class MainActivity : Activity() {
             return
         }
         if (!ShizukuBridge.isReady()) {
-            ShizukuBridge.connect()
-            output.text = "Shizuku service is not ready yet. Tap GRANT / CONNECT and retry."
+            ShizukuBridge.forceReconnect()
+            output.text = "Shizuku service is not ready. Reconnect started.\n\n" + ShizukuBridge.diagnostics()
             return
         }
         output.text = "RUNNING..."
