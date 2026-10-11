@@ -30,10 +30,12 @@ jobs:
       - name: Android SDK 35
         shell: bash
         run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           echo "ANDROID_HOME=$ANDROID_HOME"
-          command -v sdkmanager
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          echo "SDKMANAGER=$SDKMANAGER"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Build APK
         run: gradle :app:assembleDebug --stacktrace
