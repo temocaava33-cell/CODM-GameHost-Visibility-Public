@@ -23,13 +23,12 @@ object ShizukuBridge {
 
     private val args by lazy {
         Shizuku.UserServiceArgs(
-            ComponentName("com.codm.gamehost", "com.codm.gamehost.shizuku.ShellService")
+            ComponentName("com.codm.gamehost", JavaShellService::class.java.name)
         )
-            .daemon(true)
-            .tag("codm_gamehost_shell")
-            .processNameSuffix("codm_shell")
+            .daemon(false)
+            .processNameSuffix("service")
             .debuggable(true)
-            .version(4)
+            .version(5)
     }
 
     private val connection = object : ServiceConnection {
@@ -76,11 +75,8 @@ object ShizukuBridge {
         Shizuku.addRequestPermissionResultListener { code, grant ->
             if (code == REQUEST_CODE) {
                 lastEvent = "PERMISSION_RESULT:" + grant
-                if (grant == PackageManager.PERMISSION_GRANTED) {
-                    connect()
-                } else {
-                    lastError = "Shizuku permission denied: " + grant
-                }
+                if (grant == PackageManager.PERMISSION_GRANTED) connect()
+                else lastError = "Shizuku permission denied: " + grant
             }
         }
 
@@ -93,7 +89,6 @@ object ShizukuBridge {
             return
         }
         if (!permissionGranted) {
-            lastEvent = "REQUEST_PERMISSION"
             Shizuku.requestPermission(REQUEST_CODE)
         } else {
             connect()
@@ -120,8 +115,8 @@ object ShizukuBridge {
             Shizuku.bindUserService(args, connection)
         } catch (t: Throwable) {
             binding = false
-            lastError = t.javaClass.simpleName + ": " + (t.message ?: "bind failed")
             lastEvent = "BIND_EXCEPTION"
+            lastError = t.javaClass.simpleName + ": " + (t.message ?: "bind failed")
             return
         }
 
@@ -129,22 +124,21 @@ object ShizukuBridge {
             if (service == null && binding) {
                 binding = false
                 lastEvent = "BIND_TIMEOUT"
-                lastError = "No onServiceConnected callback after 5s"
+                lastError = "No onServiceConnected callback after 10s"
             }
-        }, 5000)
+        }, 10000)
     }
 
     fun forceReconnect() {
-        lastEvent = "FORCE_RECONNECT"
-        lastError = ""
         service = null
         binding = false
+        lastEvent = "FORCE_RECONNECT"
+        lastError = ""
         try {
             Shizuku.unbindUserService(args, connection, true)
-        } catch (t: Throwable) {
-            lastError = "unbind: " + t.javaClass.simpleName + ": " + (t.message ?: "failed")
+        } catch (_: Throwable) {
         }
-        mainHandler.postDelayed({ connect() }, 350)
+        mainHandler.postDelayed({ connect() }, 700)
     }
 
     fun isReady(): Boolean = binderAvailable && permissionGranted && service != null
@@ -168,7 +162,6 @@ object ShizukuBridge {
             connect()
             return null
         }
-
         return try {
             s.exec(command)
         } catch (t: Throwable) {
