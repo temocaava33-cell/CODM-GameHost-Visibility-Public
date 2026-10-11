@@ -3,31 +3,45 @@ package com.codm.gamehost.shizuku
 import android.content.ComponentName
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import rikka.shizuku.Shizuku
 
 object ShizukuBridge {
     private const val REQUEST_CODE = 9101
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     @Volatile private var service: IShellService? = null
     @Volatile private var binding = false
+    @Volatile private var initialized = false
+    @Volatile private var attempts = 0
+    @Volatile var lastEvent: String = "INIT"
+        private set
+    @Volatile var lastError: String = ""
+        private set
 
     private val args by lazy {
         Shizuku.UserServiceArgs(
-            ComponentName("com.codm.gamehost", ShellService::class.java.name)
+            ComponentName("com.codm.gamehost", "com.codm.gamehost.shizuku.ShellService")
         )
-            .daemon(false)
-            .processNameSuffix("gamehost_shell")
-            .debuggable(false)
-            .version(1)
+            .daemon(true)
+            .tag("codm_gamehost_shell")
+            .processNameSuffix("codm_shell")
+            .debuggable(true)
+            .version(4)
     }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            service = if (binder != null) IShellService.Stub.asInterface(binder) else null
+            lastEvent = "CONNECTED:" + (name?.className ?: "?")
+            lastError = ""
+            service = binder?.let { IShellService.Stub.asInterface(it) }
             binding = false
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            lastEvent = "DISCONNECTED:" + (name?.className ?: "?")
             service = null
             binding = false
         }
@@ -44,47 +58,122 @@ object ShizukuBridge {
         }
 
     fun init() {
+        if (initialized) return
+        initialized = true
+
         Shizuku.addBinderReceivedListenerSticky {
+            lastEvent = "BINDER_RECEIVED"
             if (permissionGranted) connect()
         }
+
         Shizuku.addBinderDeadListener {
+            lastEvent = "BINDER_DEAD"
+            lastError = "Shizuku binder died"
             service = null
             binding = false
         }
+
         Shizuku.addRequestPermissionResultListener { code, grant ->
-            if (code == REQUEST_CODE && grant == PackageManager.PERMISSION_GRANTED) {
-                connect()
+            if (code == REQUEST_CODE) {
+                lastEvent = "PERMISSION_RESULT:" + grant
+                if (grant == PackageManager.PERMISSION_GRANTED) {
+                    connect()
+                } else {
+                    lastError = "Shizuku permission denied: " + grant
+                }
             }
         }
+
         if (binderAvailable && permissionGranted) connect()
     }
 
     fun requestPermission() {
-        if (!binderAvailable) return
-        if (!permissionGranted) Shizuku.requestPermission(REQUEST_CODE) else connect()
+        if (!binderAvailable) {
+            lastError = "Shizuku binder unavailable"
+            return
+        }
+        if (!permissionGranted) {
+            lastEvent = "REQUEST_PERMISSION"
+            Shizuku.requestPermission(REQUEST_CODE)
+        } else {
+            connect()
+        }
     }
 
     fun connect() {
-        if (!permissionGranted || service != null || binding) return
+        if (!binderAvailable) {
+            lastError = "binder=false"
+            return
+        }
+        if (!permissionGranted) {
+            lastError = "permission=false"
+            return
+        }
+        if (service != null || binding) return
+
         binding = true
+        attempts += 1
+        lastEvent = "BIND_ATTEMPT:" + attempts
+        lastError = ""
+
         try {
             Shizuku.bindUserService(args, connection)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
             binding = false
+            lastError = t.javaClass.simpleName + ": " + (t.message ?: "bind failed")
+            lastEvent = "BIND_EXCEPTION"
+            return
         }
+
+        mainHandler.postDelayed({
+            if (service == null && binding) {
+                binding = false
+                lastEvent = "BIND_TIMEOUT"
+                lastError = "No onServiceConnected callback after 5s"
+            }
+        }, 5000)
+    }
+
+    fun forceReconnect() {
+        lastEvent = "FORCE_RECONNECT"
+        lastError = ""
+        service = null
+        binding = false
+        try {
+            Shizuku.unbindUserService(args, connection, true)
+        } catch (t: Throwable) {
+            lastError = "unbind: " + t.javaClass.simpleName + ": " + (t.message ?: "failed")
+        }
+        mainHandler.postDelayed({ connect() }, 350)
     }
 
     fun isReady(): Boolean = binderAvailable && permissionGranted && service != null
 
+    fun diagnostics(): String {
+        val uid = try { Shizuku.getUid().toString() } catch (_: Throwable) { "?" }
+        val api = try { Shizuku.getVersion().toString() } catch (_: Throwable) { "?" }
+        val err = if (lastError.isBlank()) "-" else lastError
+        return "SHIZUKU binder=" + binderAvailable +
+            " permission=" + permissionGranted +
+            " service=" + (service != null) +
+            " binding=" + binding + "\n" +
+            "serverUid=" + uid + " api=" + api +
+            " attempts=" + attempts + " event=" + lastEvent + "\n" +
+            "error=" + err
+    }
+
     fun exec(command: String): String? {
-        val s = service
-        if (s == null) {
+        val s = service ?: run {
+            lastError = "exec requested while service=null"
             connect()
             return null
         }
+
         return try {
             s.exec(command)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            lastError = "exec: " + t.javaClass.simpleName + ": " + (t.message ?: "failed")
+            lastEvent = "EXEC_EXCEPTION"
             service = null
             binding = false
             null
