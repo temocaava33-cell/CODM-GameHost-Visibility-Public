@@ -20,10 +20,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Install Android 35
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Install Android platform
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
       - name: Assemble APK
         working-directory: offline-codm
         run: gradle --no-daemon --stacktrace assembleDebug
