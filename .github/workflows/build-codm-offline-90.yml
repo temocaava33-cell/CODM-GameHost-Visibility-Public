@@ -4,7 +4,7 @@ on:
     branches: [codm-offline-90-no-vip-20261015]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   android:
     runs-on: ubuntu-latest
@@ -35,3 +35,16 @@ jobs:
           name: CODM-OFFLINE-90-DEBUG-APK
           path: offline-codm/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+      - name: Publish direct APK download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp offline-codm/app/build/outputs/apk/debug/app-debug.apk CODM_OFFLINE_90.apk
+          if gh release view codm-offline90-v1.0 >/dev/null 2>&1; then
+            gh release upload codm-offline90-v1.0 CODM_OFFLINE_90.apk --clobber
+          else
+            gh release create codm-offline90-v1.0 CODM_OFFLINE_90.apk \
+              --target "$GITHUB_SHA" \
+              --title "CODM Offline 90 - Independent Shizuku App" \
+              --notes "Independent no-ad no-VIP Android Shizuku tool for CODM GameManager profile (90 FPS / 0.7 / Performance), verification and game launching. NOT a patched Radiant Tools APK. Root is not required; Shizuku is required. Actual FPS is not guaranteed."
+          fi
