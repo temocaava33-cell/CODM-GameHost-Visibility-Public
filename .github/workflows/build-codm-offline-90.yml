@@ -8,9 +8,6 @@ permissions:
 jobs:
   android:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,11 +21,11 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Android SDK
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
-          test -x "$SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0"
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - name: Install Android platform
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
       - name: Assemble APK
         working-directory: offline-codm
         run: gradle --no-daemon --stacktrace assembleDebug
