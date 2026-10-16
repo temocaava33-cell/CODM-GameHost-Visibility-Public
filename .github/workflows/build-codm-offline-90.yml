@@ -32,19 +32,19 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CODM-OFFLINE-90-DEBUG-APK
+          name: CODM-NOVA-90-V2-APK
           path: offline-codm/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Publish direct APK download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp offline-codm/app/build/outputs/apk/debug/app-debug.apk CODM_OFFLINE_90.apk
-          if gh release view codm-offline90-v1.0 >/dev/null 2>&1; then
-            gh release upload codm-offline90-v1.0 CODM_OFFLINE_90.apk --clobber
+          cp offline-codm/app/build/outputs/apk/debug/app-debug.apk CODM_NOVA_90_v2.apk
+          if gh release view codm-nova90-v2.0 >/dev/null 2>&1; then
+            gh release upload codm-nova90-v2.0 CODM_NOVA_90_v2.apk --clobber
           else
-            gh release create codm-offline90-v1.0 CODM_OFFLINE_90.apk \
+            gh release create codm-nova90-v2.0 CODM_NOVA_90_v2.apk \
               --target "$GITHUB_SHA" \
-              --title "CODM Offline 90 - Independent Shizuku App" \
-              --notes "Independent no-ad no-VIP Android Shizuku tool for CODM GameManager profile (90 FPS / 0.7 / Performance), verification and game launching. NOT a patched Radiant Tools APK. Root is not required; Shizuku is required. Actual FPS is not guaranteed."
+              --title "CODM NOVA 90 v2 - Standalone Shizuku Performance Lab" \
+              --notes "Standalone redesigned native Android dashboard without ads or VIP for CODM GameManager profile (90 FPS / 0.7 / Performance), verification and game launching. NOT a patched Radiant Tools APK. Root is not required; Shizuku is required. Actual FPS is not guaranteed."
           fi
