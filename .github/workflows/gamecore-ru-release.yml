@@ -32,8 +32,11 @@ jobs:
       - name: Prepare Android 34 SDK
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$(find "$SDK_ROOT" -type f -name sdkmanager -print -quit)"
+          test -x "$SDKMANAGER" || { echo "sdkmanager not found in $SDK_ROOT"; exit 1; }
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Install translation engine
         run: python3 -m pip install --break-system-packages argostranslate
