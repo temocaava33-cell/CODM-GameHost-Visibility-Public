@@ -1,0 +1,55 @@
+name: GameCore RU - Build Release APK
+on:
+  push:
+    branches: [gamecore-ru-build]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout dedicated build branch
+        uses: actions/checkout@v4
+      - name: Verify source archive
+        id: source
+        run: |
+          if [ -f GameCore_RU_3.19.0_SOURCE_UNFINISHED.zip ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Upload GameCore_RU_3.19.0_SOURCE_UNFINISHED.zip to this branch."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Unpack GameCore RU sources
+        if: steps.source.outputs.available == 'true'
+        run: |
+          mkdir -p gc-build
+          unzip -q GameCore_RU_3.19.0_SOURCE_UNFINISHED.zip -d gc-build
+      - uses: actions/setup-java@v4
+        if: steps.source.outputs.available == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        if: steps.source.outputs.available == 'true'
+      - name: Install required Android build SDK
+        if: steps.source.outputs.available == 'true'
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.source.outputs.available == 'true'
+      - name: Build and sign Release APK
+        if: steps.source.outputs.available == 'true'
+        working-directory: gc-build/GameCore-RU-3.19.0
+        shell: bash
+        run: |
+          keypass="$(openssl rand -hex 24)"
+          keytool -genkeypair -keystore gamecore-ru-release.jks -storepass "$keypass" -keypass "$keypass" -alias gamecore-ru -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=Personal GameCore RU build"
+          printf 'storeFile=gamecore-ru-release.jks\nstorePassword=%s\nkeyAlias=gamecore-ru\nkeyPassword=%s\n' "$keypass" "$keypass" > keystore.properties
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+      - uses: actions/upload-artifact@v4
+        if: steps.source.outputs.available == 'true'
+        with:
+          name: GameCore-RU-3.19-Release-TEST-incomplete-translation
+          path: gc-build/GameCore-RU-3.19.0/app/build/outputs/apk/release/app-release.apk
