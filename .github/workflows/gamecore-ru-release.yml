@@ -29,11 +29,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android 34 platform and build tools
-        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+      - name: Prepare Android 34 SDK
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Install translation engine
         run: python3 -m pip install --break-system-packages argostranslate
