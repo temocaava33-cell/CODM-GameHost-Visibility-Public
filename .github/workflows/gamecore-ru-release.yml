@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Dreamucxe/GameCore
-          ref: 1fb6e865f6b019aa8456e4b463be8f0c50f8bdd4
+          ref: 7a11384e28907cb46b7f833c3b07dc0b01d18a7c
           path: GameCore
           persist-credentials: false
 
